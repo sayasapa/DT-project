@@ -91,7 +91,7 @@ REQUEST_TIMEOUT = 20
 RETRIES = 2
 
 CSV_FIELDS = [
-    "timestamp_utc", "cycle_id", "station_id", "station_name", "district", "road", "lat", "lon",
+    "timestamp_utc", "cycle_id", "station_id", "station_name", "aq_id", "lat", "lon",
     # traffic
     "speed_kmh", "free_flow_speed_kmh", "current_travel_time_s", "free_flow_travel_time_s",
     "density_cars_per_km", "cars_per_hour", "congestion_percent", "co2_kg_per_hour",
@@ -237,7 +237,7 @@ def main():
             weather["weather_source"] = "unavailable"
 
         row = {"timestamp_utc": ts_iso, "cycle_id": cycle_id, "station_id": st["id"],
-               "station_name": st["name"], "district": st["district"], "road": st["road"],
+               "station_name": st["name"], "aq_id": st.get("aq_id", ""),
                "lat": st["lat"], "lon": st["lon"],
                "population_exposure_index": exposure_index(air, traffic),
                "dist_to_chp_km": _dist_km(st["lat"], st["lon"], CHP_LAT, CHP_LON),

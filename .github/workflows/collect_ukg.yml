@@ -1,1 +1,31 @@
+name: Collect Ust-Kamenogorsk Air Data
+on:
+  schedule:
+    - cron: '5,25,45 * * * *'   # offset from Almaty (every 20 min, at :05 :25 :45)
+  workflow_dispatch:
 
+permissions:
+  contents: write
+
+jobs:
+  collect_ukg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run UKG collector
+        env:
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+          OPENWEATHER_KEY: ${{ secrets.OPENWEATHER_KEY }}
+          TOMTOM_KEY: ${{ secrets.TOMTOM_KEY }}
+        run: python collector_ukg.py
+      - name: Commit UKG data
+        run: |
+          git config user.name "ukg-collector-bot"
+          git config user.email "actions@github.com"
+          git add data/ukg_air_data.csv || echo "no file to add"
+          git commit -m "ukg data: $(date -u +%Y-%m-%dT%H:%M)" || echo "nothing to commit"
+          git pull --rebase --autostash || true
+          git push || echo "nothing to push"

@@ -87,19 +87,14 @@ def get_iqair_reading(lat, lon):
     wea = cur.get("weather", {})
     coords = (d.get("location", {}) or {}).get("coordinates") or [None, None]  # [lon, lat]
 
-    pm25 = (pol.get("p2") or {}).get("conc")
-    pm10 = (pol.get("p1") or {}).get("conc")
-    if pm25 is None and pm10 is None:
-        # Debug: see exactly what the pollution block contains if concentration
-        # fields are missing (Community tier may only expose AQI, not raw µg/m³).
-        print(f"  IQAir: pm25/pm10 conc missing. pollution raw={json.dumps(pol)}")
-
+    # Note: IQAir's free "Community" plan only returns AQI index values
+    # (aqius/aqicn per pollutant), not raw µg/m³ concentrations ("conc" is a
+    # paid-tier field). So we only collect aqi_us/aqi_cn here, not pm25/pm10.
     return {
         "city": d.get("city"), "state": d.get("state"), "country": d.get("country"),
         "lat": coords[1], "lon": coords[0],
         "aqi_us": pol.get("aqius"), "main_us": pol.get("mainus"),
         "aqi_cn": pol.get("aqicn"), "main_cn": pol.get("maincn"),
-        "pm25": pm25, "pm10": pm10,
         "pollution_time": pol.get("ts"),
         "temp_c": wea.get("tp"), "pressure": wea.get("pr"), "humidity": wea.get("hu"),
         "wind_speed": wea.get("ws"), "wind_deg": wea.get("wd"), "weather_icon": wea.get("ic"),
@@ -156,7 +151,6 @@ def collect():
     row = {"timestamp_utc": ts, "cycle_id": cycle_id,
            "city": reading["city"], "state": reading["state"], "country": reading["country"],
            "lat": lat, "lon": lon,
-           "pm25": reading["pm25"], "pm10": reading["pm10"],
            "aqi_us": reading["aqi_us"], "main_us": reading["main_us"],
            "aqi_cn": reading["aqi_cn"], "main_cn": reading["main_cn"],
            "pollution_time": reading["pollution_time"],

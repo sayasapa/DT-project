@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
 """
-Ust-Kamenogorsk (Oskemen) Air Quality Collector
+Ust-Kamenogorsk (Oskemen) Air Quality Collector — IQAir (AirVisual) edition
 Industrial city — sources: Kazzinc (lead-zinc), UMZ (Ulba metallurgical), CHP.
-Collects: air quality (AQICN/WAQI), weather (OpenWeather), traffic (TomTom),
-industrial-source context (distance/bearing/downwind per source).
+Collects: air quality + weather (IQAir/AirVisual "nearest_city", Community tier),
+traffic (TomTom), industrial-source context (distance/bearing/downwind per source).
 Runs 24/7 via GitHub Actions.
 
+Why IQAir instead of AQICN/WAQI: extensive testing (map/bounds discovery, search,
+and direct city-feed lookups) found WAQI has no queryable station for this city
+under our token. IQAir has confirmed, working monitoring coverage for
+Ust-Kamenogorsk, so we switched providers.
+
+Note on the free "Community" plan: IQAir only exposes a single city-level
+aggregate reading per request (PM2.5, PM10, AQI, weather) — the per-station
+list/nearest-station endpoints require a paid "Startup" plan. So each collection
+cycle here writes ONE row (the city aggregate), not one row per station. SO2,
+NO2, CO and O3 are not available on the Community plan.
+
 SECRETS (GitHub Actions):
-  WAQI_TOKEN       - AQICN/WAQI token   (https://aqicn.org/data-platform/token/)
-  OPENWEATHER_KEY  - OpenWeather key     (https://openweathermap.org/api)
-  TOMTOM_KEY       - TomTom traffic key  (https://developer.tomtom.com/)
+  IQAIR_KEY   - IQAir/AirVisual API key (Community tier, free)  (https://www.iqair.com/dashboard/api)
+  TOMTOM_KEY  - TomTom traffic key (optional)                    (https://developer.tomtom.com/)
 """
 import os, csv, math, time, json
 from datetime import datetime, timezone
-import urllib.request
+import urllib.request, urllib.parse
 
 # ---------------- SECRETS (match your GitHub secret names) ----------------
-WAQI_TOKEN      = os.environ.get("WAQI_TOKEN", "")
-OPENWEATHER_KEY = os.environ.get("OPENWEATHER_KEY", "")
-TOMTOM_KEY      = os.environ.get("TOMTOM_KEY", "")
-OUT_CSV         = "data/ukg_air_data.csv"
+IQAIR_KEY  = os.environ.get("IQAIR_KEY", "")
+TOMTOM_KEY = os.environ.get("TOMTOM_KEY", "")
+OUT_CSV    = "data/ukg_air_data.csv"
 
 # City center (Ust-Kamenogorsk / Oskemen)
 CITY = {"name": "Ust-Kamenogorsk", "lat": 49.9714, "lon": 82.6059}
@@ -30,11 +39,6 @@ SOURCES = {
     "UMZ":     {"lat": 49.9550, "lon": 82.6060, "type": "metallurgical_uranium_beryllium"},
     "CHP":     {"lat": 49.9400, "lon": 82.6300, "type": "thermal_power_plant"},
 }
-
-# Fallback: if map/bounds/ discovery returns 0 stations (this can happen for
-# smaller cities), search for stations by name using WAQI's search endpoint
-# instead of guessing UIDs. This returns *real*, queryable station UIDs.
-SEARCH_KEYWORDS = ["Ust-Kamenogorsk", "Oskemen", "Усть-Каменогорск", "Өскемен"]
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):
@@ -65,119 +69,35 @@ def fetch_json(url):
         print(f"  fetch error: {e}")
         return None
 
-# ---------------- AQICN/WAQI ----------------
-def get_aqicn_stations():
-    lat1, lon1 = CITY["lat"]-0.3, CITY["lon"]-0.4
-    lat2, lon2 = CITY["lat"]+0.3, CITY["lon"]+0.4
-    url = f"https://api.waqi.info/map/bounds/?latlng={lat1},{lon1},{lat2},{lon2}&token={WAQI_TOKEN}"
+# ---------------- IQAir / AirVisual ----------------
+def get_iqair_reading(lat, lon):
+    url = ("https://api.airvisual.com/v2/nearest_city"
+           f"?lat={lat}&lon={lon}&key={urllib.parse.quote(IQAIR_KEY)}")
     data = fetch_json(url)
-    stations = []
-    seen_uids = set()
-    if data and data.get("status") == "ok":
-        for s in data["data"]:
-            uid = s.get("uid")
-            stations.append({"uid": uid, "lat": s.get("lat"),
-                             "lon": s.get("lon"),
-                             "name": s.get("station", {}).get("name", "unknown"),
-                             "aqi": s.get("aqi")})
-            seen_uids.add(uid)
-    else:
-        # Debug: surface *why* bounds discovery failed (bad token, rate limit, etc.)
-        status = data.get("status") if data else "no_response"
-        print(f"  bounds discovery non-ok status: {status} raw={data}")
+    if not data:
+        print("  IQAir: no response")
+        return None
+    if data.get("status") != "success":
+        print(f"  IQAir non-success status: {data.get('status')} raw={data}")
+        return None
 
-    # Fallback: search by city name via WAQI's search endpoint. This finds real,
-    # queryable station UIDs even when map/bounds/ discovery misses them (returns
-    # nothing useful for some smaller cities / community sensor networks).
-    if not stations:
-        import urllib.parse
-        for kw in SEARCH_KEYWORDS:
-            search_url = f"https://api.waqi.info/search/?token={WAQI_TOKEN}&keyword={urllib.parse.quote(kw)}"
-            sdata = fetch_json(search_url)
-            if sdata and sdata.get("status") == "ok":
-                for s in sdata.get("data", []):
-                    uid = s.get("uid")
-                    if uid in seen_uids:
-                        continue
-                    st = s.get("station", {})
-                    geo = st.get("geo")
-                    lat = geo[0] if geo and len(geo) == 2 else None
-                    lon = geo[1] if geo and len(geo) == 2 else None
-                    stations.append({"uid": uid, "lat": lat, "lon": lon,
-                                     "name": st.get("name", "unknown"),
-                                     "aqi": s.get("aqi")})
-                    seen_uids.add(uid)
-            else:
-                status = sdata.get("status") if sdata else "no_response"
-                print(f"  search '{kw}' non-ok status: {status} raw={sdata}")
-            time.sleep(0.3)
-        print(f"  search fallback found {len(stations)} station(s): "
-              f"{[(s['uid'], s['name']) for s in stations]}")
+    d = data["data"]
+    cur = d.get("current", {})
+    pol = cur.get("pollution", {})
+    wea = cur.get("weather", {})
+    coords = (d.get("location", {}) or {}).get("coordinates") or [None, None]  # [lon, lat]
 
-    # Last resort: WAQI's City Feed endpoint resolves a city name directly to its
-    # best-matching station (e.g. api.waqi.info/feed/shanghai/), without needing
-    # search or bounds discovery to have indexed it separately.
-    if not stations:
-        for slug in ["ust-kamenogorsk", "oskemen"]:
-            feed_url = f"https://api.waqi.info/feed/{slug}/?token={WAQI_TOKEN}"
-            fdata = fetch_json(feed_url)
-            if fdata and fdata.get("status") == "ok":
-                fd = fdata["data"]
-                uid = fd.get("idx")
-                geo = fd.get("city", {}).get("geo")
-                lat = geo[0] if geo and len(geo) == 2 else None
-                lon = geo[1] if geo and len(geo) == 2 else None
-                name = fd.get("city", {}).get("name", slug)
-                print(f"  city feed '{slug}' resolved: uid={uid} name={name!r} geo={geo}")
-                if uid is not None and uid not in seen_uids:
-                    stations.append({"uid": uid, "lat": lat, "lon": lon, "name": name,
-                                     "aqi": fd.get("aqi")})
-                    seen_uids.add(uid)
-            else:
-                status = fdata.get("status") if fdata else "no_response"
-                print(f"  city feed '{slug}' non-ok status: {status} raw={fdata}")
-            time.sleep(0.3)
-
-    return stations
-
-def get_aqicn_detail(uid):
-    url = f"https://api.waqi.info/feed/@{uid}/?token={WAQI_TOKEN}"
-    data = fetch_json(url)
-    if data and data.get("status") == "ok":
-        d = data["data"]; iaqi = d.get("iaqi", {})
-        result = {"pm25": iaqi.get("pm25", {}).get("v"),
-                "pm10": iaqi.get("pm10", {}).get("v"),
-                "no2":  iaqi.get("no2", {}).get("v"),
-                "so2":  iaqi.get("so2", {}).get("v"),   # metallurgy marker
-                "co":   iaqi.get("co", {}).get("v"),
-                "o3":   iaqi.get("o3", {}).get("v"),
-                "aqi":  d.get("aqi"),
-                "time": d.get("time", {}).get("iso")}
-        # Debug: if every field came back empty despite status "ok", something is
-        # off (rate limit / stub response / unexpected schema) — dump the raw
-        # top-level keys and a snippet so we can see what's actually there.
-        if not any(v is not None for v in result.values()):
-            print(f"  detail @{uid}: status ok but all fields empty. "
-                  f"top-level data keys={list(d.keys())} raw={json.dumps(d)[:500]}")
-        return result
-    else:
-        status = data.get("status") if data else "no_response"
-        print(f"  detail @{uid} non-ok status: {status} raw={data}")
-    return None
-
-# ---------------- Weather (OpenWeather) ----------------
-def get_weather(lat, lon):
-    if not OPENWEATHER_KEY:
-        return {}
-    url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_KEY}&units=metric"
-    d = fetch_json(url)
-    if d and d.get("main"):
-        return {"temp_c": d["main"].get("temp"), "humidity": d["main"].get("humidity"),
-                "pressure": d["main"].get("pressure"),
-                "wind_speed": d.get("wind", {}).get("speed"),
-                "wind_deg": d.get("wind", {}).get("deg"),
-                "weather": d.get("weather", [{}])[0].get("description", "")}
-    return {}
+    return {
+        "city": d.get("city"), "state": d.get("state"), "country": d.get("country"),
+        "lat": coords[1], "lon": coords[0],
+        "aqi_us": pol.get("aqius"), "main_us": pol.get("mainus"),
+        "aqi_cn": pol.get("aqicn"), "main_cn": pol.get("maincn"),
+        "pm25": (pol.get("p2") or {}).get("conc"),
+        "pm10": (pol.get("p1") or {}).get("conc"),
+        "pollution_time": pol.get("ts"),
+        "temp_c": wea.get("tp"), "pressure": wea.get("pr"), "humidity": wea.get("hu"),
+        "wind_speed": wea.get("ws"), "wind_deg": wea.get("wd"), "weather_icon": wea.get("ic"),
+    }
 
 # ---------------- Traffic (TomTom) ----------------
 def get_traffic(lat, lon):
@@ -204,66 +124,58 @@ def collect():
     cycle_id = int(time.time())
     print(f"[{ts}] Collecting Ust-Kamenogorsk (cycle {cycle_id})")
 
-    weather = get_weather(CITY["lat"], CITY["lon"])
-    wind_deg = weather.get("wind_deg")
-    heating_season = 1 if datetime.now().month in (10,11,12,1,2,3) else 0
-
-    stations = get_aqicn_stations()
-    print(f"  Found {len(stations)} AQICN stations")
-
-    rows = []
-    for st in stations:
-        if st["lat"] is None or st["lon"] is None:
-            print(f"  station @{st['uid']} ({st['name']}) has no coords, using city center")
-            st["lat"], st["lon"] = CITY["lat"], CITY["lon"]
-        detail = get_aqicn_detail(st["uid"]) or {}
-        time.sleep(0.5)
-        traffic = get_traffic(st["lat"], st["lon"])
-        time.sleep(0.3)
-
-        src_feats = {}
-        for sname, s in SOURCES.items():
-            d = geodist_km(s["lat"], s["lon"], st["lat"], st["lon"])
-            b = bearing_from(s["lat"], s["lon"], st["lat"], st["lon"])
-            src_feats[f"dist_{sname}_km"] = round(d, 2)
-            src_feats[f"bearing_{sname}"] = round(b, 1)
-            src_feats[f"downwind_{sname}"] = is_downwind(b, wind_deg)
-
-        nearest = min(SOURCES.items(),
-                      key=lambda kv: geodist_km(kv[1]["lat"], kv[1]["lon"], st["lat"], st["lon"]))
-        row = {"timestamp_utc": ts, "cycle_id": cycle_id,
-               "station_uid": st["uid"], "station_name": st["name"],
-               "lat": st["lat"], "lon": st["lon"],
-               "pm25": detail.get("pm25"), "pm10": detail.get("pm10"),
-               "no2": detail.get("no2"), "so2": detail.get("so2"),
-               "co": detail.get("co"), "o3": detail.get("o3"),
-               "aqi": detail.get("aqi"), "aqi_time": detail.get("time"),
-               "current_speed": traffic.get("current_speed"),
-               "free_flow_speed": traffic.get("free_flow_speed"),
-               "congestion_percent": traffic.get("congestion_percent"),
-               "nearest_source": nearest[0],
-               "nearest_source_dist_km": round(geodist_km(nearest[1]["lat"], nearest[1]["lon"], st["lat"], st["lon"]), 2),
-               **src_feats,
-               "temp_c": weather.get("temp_c"), "humidity": weather.get("humidity"),
-               "pressure": weather.get("pressure"), "wind_speed": weather.get("wind_speed"),
-               "wind_deg": wind_deg, "weather_desc": weather.get("weather"),
-               "heating_season": heating_season}
-        rows.append(row)
-
-    if rows:
-        os.makedirs(os.path.dirname(OUT_CSV), exist_ok=True)
-        file_exists = os.path.isfile(OUT_CSV)
-        with open(OUT_CSV, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            if not file_exists:
-                w.writeheader()
-            w.writerows(rows)
-        print(f"  Wrote {len(rows)} rows to {OUT_CSV}")
-    else:
+    reading = get_iqair_reading(CITY["lat"], CITY["lon"])
+    if not reading:
         print("  No data collected this cycle")
+        return
+
+    lat = reading["lat"] if reading["lat"] is not None else CITY["lat"]
+    lon = reading["lon"] if reading["lon"] is not None else CITY["lon"]
+    wind_deg = reading["wind_deg"]
+    heating_season = 1 if datetime.now().month in (10, 11, 12, 1, 2, 3) else 0
+
+    traffic = get_traffic(lat, lon)
+
+    src_feats = {}
+    for sname, s in SOURCES.items():
+        d = geodist_km(s["lat"], s["lon"], lat, lon)
+        b = bearing_from(s["lat"], s["lon"], lat, lon)
+        src_feats[f"dist_{sname}_km"] = round(d, 2)
+        src_feats[f"bearing_{sname}"] = round(b, 1)
+        src_feats[f"downwind_{sname}"] = is_downwind(b, wind_deg)
+
+    nearest = min(SOURCES.items(),
+                  key=lambda kv: geodist_km(kv[1]["lat"], kv[1]["lon"], lat, lon))
+
+    row = {"timestamp_utc": ts, "cycle_id": cycle_id,
+           "city": reading["city"], "state": reading["state"], "country": reading["country"],
+           "lat": lat, "lon": lon,
+           "pm25": reading["pm25"], "pm10": reading["pm10"],
+           "aqi_us": reading["aqi_us"], "main_us": reading["main_us"],
+           "aqi_cn": reading["aqi_cn"], "main_cn": reading["main_cn"],
+           "pollution_time": reading["pollution_time"],
+           "current_speed": traffic.get("current_speed"),
+           "free_flow_speed": traffic.get("free_flow_speed"),
+           "congestion_percent": traffic.get("congestion_percent"),
+           "nearest_source": nearest[0],
+           "nearest_source_dist_km": round(geodist_km(nearest[1]["lat"], nearest[1]["lon"], lat, lon), 2),
+           **src_feats,
+           "temp_c": reading["temp_c"], "humidity": reading["humidity"],
+           "pressure": reading["pressure"], "wind_speed": reading["wind_speed"],
+           "wind_deg": wind_deg, "weather_icon": reading["weather_icon"],
+           "heating_season": heating_season}
+
+    os.makedirs(os.path.dirname(OUT_CSV), exist_ok=True)
+    file_exists = os.path.isfile(OUT_CSV)
+    with open(OUT_CSV, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if not file_exists:
+            w.writeheader()
+        w.writerow(row)
+    print(f"  Wrote 1 row to {OUT_CSV}")
 
 if __name__ == "__main__":
-    if not WAQI_TOKEN:
-        print("ERROR: set WAQI_TOKEN (get free token at aqicn.org/data-platform/token/)")
+    if not IQAIR_KEY:
+        print("ERROR: set IQAIR_KEY (get free key at https://www.iqair.com/dashboard/api)")
     else:
         collect()

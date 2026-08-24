@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+!/usr/bin/env python3
 """
 Ust-Kamenogorsk (Oskemen) Air Quality Collector — AQICN/WAQI edition (v3)
 Industrial city — sources: Kazzinc (lead-zinc), UMZ (Ulba metallurgical), CHP.
@@ -48,8 +48,12 @@ SOURCES = {
 # by fetching their live aqicn.org station pages (not guessed). These replace
 # the earlier AirKaz.org guesses (114562/114571/517498), which turned out to
 # be stale/decommissioned page references outside the working ID range.
-KNOWN_STATION_UIDS = [517390, 517402, 517507, 519514]
-# Серікбаев 19, Лев Толстой 18, М.Тынышпаев 126, Широкая 44
+# Note: 519514 ("Широкая, 44") has a station page on aqicn.org but its API
+# feed consistently returns "no such station" under both prefixes — likely
+# deregistered from the live API despite historical data still being shown
+# on the website. Left out until/unless it comes back online.
+KNOWN_STATION_UIDS = [517390, 517402, 517507]
+# Серікбаев 19, Лев Толстой 18, М.Тынышпаев 126
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):

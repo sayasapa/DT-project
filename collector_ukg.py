@@ -114,6 +114,30 @@ def get_aqicn_stations():
         print(f"  search fallback found {len(stations)} station(s): "
               f"{[(s['uid'], s['name']) for s in stations]}")
 
+    # Last resort: WAQI's City Feed endpoint resolves a city name directly to its
+    # best-matching station (e.g. api.waqi.info/feed/shanghai/), without needing
+    # search or bounds discovery to have indexed it separately.
+    if not stations:
+        for slug in ["ust-kamenogorsk", "oskemen"]:
+            feed_url = f"https://api.waqi.info/feed/{slug}/?token={WAQI_TOKEN}"
+            fdata = fetch_json(feed_url)
+            if fdata and fdata.get("status") == "ok":
+                fd = fdata["data"]
+                uid = fd.get("idx")
+                geo = fd.get("city", {}).get("geo")
+                lat = geo[0] if geo and len(geo) == 2 else None
+                lon = geo[1] if geo and len(geo) == 2 else None
+                name = fd.get("city", {}).get("name", slug)
+                print(f"  city feed '{slug}' resolved: uid={uid} name={name!r} geo={geo}")
+                if uid is not None and uid not in seen_uids:
+                    stations.append({"uid": uid, "lat": lat, "lon": lon, "name": name,
+                                     "aqi": fd.get("aqi")})
+                    seen_uids.add(uid)
+            else:
+                status = fdata.get("status") if fdata else "no_response"
+                print(f"  city feed '{slug}' non-ok status: {status} raw={fdata}")
+            time.sleep(0.3)
+
     return stations
 
 def get_aqicn_detail(uid):
@@ -243,4 +267,3 @@ if __name__ == "__main__":
         print("ERROR: set WAQI_TOKEN (get free token at aqicn.org/data-platform/token/)")
     else:
         collect()
-

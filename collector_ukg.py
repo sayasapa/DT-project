@@ -31,12 +31,10 @@ SOURCES = {
     "CHP":     {"lat": 49.9400, "lon": 82.6300, "type": "thermal_power_plant"},
 }
 
-# Fallback: known AQICN/WAQI station UIDs in Ust-Kamenogorsk (AirNet low-cost sensor
-# network). The map/bounds/ discovery endpoint frequently returns 0 results for this
-# city because AirNet community sensors aren't always indexed there, unlike Almaty's
-# official Kazhydromet station. We query these directly by UID as a guaranteed source
-# of data, in addition to whatever bounds discovery finds (deduplicated by uid).
-KNOWN_STATION_UIDS = [239470, 519514]
+# Fallback: if map/bounds/ discovery returns 0 stations (this can happen for
+# smaller cities), search for stations by name using WAQI's search endpoint
+# instead of guessing UIDs. This returns *real*, queryable station UIDs.
+SEARCH_KEYWORDS = ["Ust-Kamenogorsk", "Oskemen", "Усть-Каменогорск", "Өскемен"]
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):
@@ -88,33 +86,33 @@ def get_aqicn_stations():
         status = data.get("status") if data else "no_response"
         print(f"  bounds discovery non-ok status: {status} raw={data}")
 
-    # Fallback / supplement: query known Ust-Kamenogorsk station UIDs directly.
-    # This guarantees data even when map/bounds discovery misses AirNet sensors.
-    for uid in KNOWN_STATION_UIDS:
-        if uid in seen_uids:
-            continue
-        detail_url = f"https://api.waqi.info/feed/@{uid}/?token={WAQI_TOKEN}"
-        d = fetch_json(detail_url)
-        if d and d.get("status") == "ok":
-            dd = d["data"]
-            geo = dd.get("city", {}).get("geo")
-            # Some AirNet community stations omit city.geo in the feed response.
-            # Fall back to the city center so the row still has valid coordinates
-            # (source-distance/bearing/downwind features just use the city center).
-            lat = geo[0] if geo and len(geo) == 2 else CITY["lat"]
-            lon = geo[1] if geo and len(geo) == 2 else CITY["lon"]
-            name = dd.get("city", {}).get("name")
-            if not name:
-                print(f"  known station @{uid}: no city.name in response. "
-                      f"data keys={list(dd.keys())} raw={json.dumps(dd)[:500]}")
-                name = "unknown"
-            stations.append({"uid": uid, "lat": lat, "lon": lon,
-                             "name": name, "aqi": dd.get("aqi")})
-            seen_uids.add(uid)
-        else:
-            status = d.get("status") if d else "no_response"
-            print(f"  known station @{uid} non-ok status: {status}")
-        time.sleep(0.3)
+    # Fallback: search by city name via WAQI's search endpoint. This finds real,
+    # queryable station UIDs even when map/bounds/ discovery misses them (returns
+    # nothing useful for some smaller cities / community sensor networks).
+    if not stations:
+        import urllib.parse
+        for kw in SEARCH_KEYWORDS:
+            search_url = f"https://api.waqi.info/search/?token={WAQI_TOKEN}&keyword={urllib.parse.quote(kw)}"
+            sdata = fetch_json(search_url)
+            if sdata and sdata.get("status") == "ok":
+                for s in sdata.get("data", []):
+                    uid = s.get("uid")
+                    if uid in seen_uids:
+                        continue
+                    st = s.get("station", {})
+                    geo = st.get("geo")
+                    lat = geo[0] if geo and len(geo) == 2 else None
+                    lon = geo[1] if geo and len(geo) == 2 else None
+                    stations.append({"uid": uid, "lat": lat, "lon": lon,
+                                     "name": st.get("name", "unknown"),
+                                     "aqi": s.get("aqi")})
+                    seen_uids.add(uid)
+            else:
+                status = sdata.get("status") if sdata else "no_response"
+                print(f"  search '{kw}' non-ok status: {status} raw={sdata}")
+            time.sleep(0.3)
+        print(f"  search fallback found {len(stations)} station(s): "
+              f"{[(s['uid'], s['name']) for s in stations]}")
 
     return stations
 
@@ -192,7 +190,8 @@ def collect():
     rows = []
     for st in stations:
         if st["lat"] is None or st["lon"] is None:
-            continue
+            print(f"  station @{st['uid']} ({st['name']}) has no coords, using city center")
+            st["lat"], st["lon"] = CITY["lat"], CITY["lon"]
         detail = get_aqicn_detail(st["uid"]) or {}
         time.sleep(0.5)
         traffic = get_traffic(st["lat"], st["lon"])
@@ -244,3 +243,4 @@ if __name__ == "__main__":
         print("ERROR: set WAQI_TOKEN (get free token at aqicn.org/data-platform/token/)")
     else:
         collect()
+

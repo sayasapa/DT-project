@@ -97,8 +97,13 @@ def get_aqicn_stations():
         d = fetch_json(detail_url)
         if d and d.get("status") == "ok":
             dd = d["data"]
-            stations.append({"uid": uid, "lat": dd.get("city", {}).get("geo", [None, None])[0],
-                             "lon": dd.get("city", {}).get("geo", [None, None])[1],
+            geo = dd.get("city", {}).get("geo")
+            # Some AirNet community stations omit city.geo in the feed response.
+            # Fall back to the city center so the row still has valid coordinates
+            # (source-distance/bearing/downwind features just use the city center).
+            lat = geo[0] if geo and len(geo) == 2 else CITY["lat"]
+            lon = geo[1] if geo and len(geo) == 2 else CITY["lon"]
+            stations.append({"uid": uid, "lat": lat, "lon": lon,
                              "name": dd.get("city", {}).get("name", "unknown"),
                              "aqi": dd.get("aqi")})
             seen_uids.add(uid)

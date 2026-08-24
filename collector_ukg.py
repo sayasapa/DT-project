@@ -1,4 +1,4 @@
-!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Ust-Kamenogorsk (Oskemen) Air Quality Collector — AQICN/WAQI edition (v3)
 Industrial city — sources: Kazzinc (lead-zinc), UMZ (Ulba metallurgical), CHP.

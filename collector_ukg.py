@@ -103,9 +103,13 @@ def get_aqicn_stations():
             # (source-distance/bearing/downwind features just use the city center).
             lat = geo[0] if geo and len(geo) == 2 else CITY["lat"]
             lon = geo[1] if geo and len(geo) == 2 else CITY["lon"]
+            name = dd.get("city", {}).get("name")
+            if not name:
+                print(f"  known station @{uid}: no city.name in response. "
+                      f"data keys={list(dd.keys())} raw={json.dumps(dd)[:500]}")
+                name = "unknown"
             stations.append({"uid": uid, "lat": lat, "lon": lon,
-                             "name": dd.get("city", {}).get("name", "unknown"),
-                             "aqi": dd.get("aqi")})
+                             "name": name, "aqi": dd.get("aqi")})
             seen_uids.add(uid)
         else:
             status = d.get("status") if d else "no_response"
@@ -119,7 +123,7 @@ def get_aqicn_detail(uid):
     data = fetch_json(url)
     if data and data.get("status") == "ok":
         d = data["data"]; iaqi = d.get("iaqi", {})
-        return {"pm25": iaqi.get("pm25", {}).get("v"),
+        result = {"pm25": iaqi.get("pm25", {}).get("v"),
                 "pm10": iaqi.get("pm10", {}).get("v"),
                 "no2":  iaqi.get("no2", {}).get("v"),
                 "so2":  iaqi.get("so2", {}).get("v"),   # metallurgy marker
@@ -127,6 +131,16 @@ def get_aqicn_detail(uid):
                 "o3":   iaqi.get("o3", {}).get("v"),
                 "aqi":  d.get("aqi"),
                 "time": d.get("time", {}).get("iso")}
+        # Debug: if every field came back empty despite status "ok", something is
+        # off (rate limit / stub response / unexpected schema) — dump the raw
+        # top-level keys and a snippet so we can see what's actually there.
+        if not any(v is not None for v in result.values()):
+            print(f"  detail @{uid}: status ok but all fields empty. "
+                  f"top-level data keys={list(d.keys())} raw={json.dumps(d)[:500]}")
+        return result
+    else:
+        status = data.get("status") if data else "no_response"
+        print(f"  detail @{uid} non-ok status: {status} raw={data}")
     return None
 
 # ---------------- Weather (OpenWeather) ----------------

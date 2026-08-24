@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+!/usr/bin/env python3
 """
 Ust-Kamenogorsk (Oskemen) Air Quality Collector — AQICN/WAQI edition (v3)
 Industrial city — sources: Kazzinc (lead-zinc), UMZ (Ulba metallurgical), CHP.
@@ -28,9 +28,10 @@ from datetime import datetime, timezone
 import urllib.request
 
 # ---------------- SECRETS (match your GitHub secret names) ----------------
-WAQI_TOKEN  = os.environ.get("WAQI_TOKEN", "")
-TOMTOM_KEY  = os.environ.get("TOMTOM_KEY", "")
-OUT_CSV     = "data/ukg_air_data.csv"
+WAQI_TOKEN      = os.environ.get("WAQI_TOKEN", "")
+OPENWEATHER_KEY = os.environ.get("OPENWEATHER_KEY", "")
+TOMTOM_KEY      = os.environ.get("TOMTOM_KEY", "")
+OUT_CSV         = "data/ukg_air_data.csv"
 
 # City center (Ust-Kamenogorsk / Oskemen)
 CITY = {"name": "Ust-Kamenogorsk", "lat": 49.9714, "lon": 82.6059}
@@ -150,6 +151,24 @@ def get_aqicn_stations():
         time.sleep(0.3)
     return stations
 
+# ---------------- Weather (OpenWeather) ----------------
+def get_weather(lat, lon):
+    """The AirKaz/AirNet PM sensor stations here don't report weather (no t/h/
+    p/w/wd fields) — they're pollutant-only sensors. Get wind/temp/humidity/
+    pressure from OpenWeather instead, independent of the AQI station, so
+    downwind flags can actually be computed."""
+    if not OPENWEATHER_KEY:
+        return {}
+    url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_KEY}&units=metric"
+    d = fetch_json(url)
+    if d and d.get("main"):
+        return {"temp_c": d["main"].get("temp"), "humidity": d["main"].get("humidity"),
+                "pressure": d["main"].get("pressure"),
+                "wind_speed": d.get("wind", {}).get("speed"),
+                "wind_deg": d.get("wind", {}).get("deg"),
+                "weather_desc": d.get("weather", [{}])[0].get("description", "")}
+    return {}
+
 # ---------------- Traffic (TomTom) ----------------
 def get_traffic(lat, lon):
     if not TOMTOM_KEY:
@@ -183,7 +202,15 @@ def collect():
     rows = []
     for st in stations:
         lat, lon = st["lat"], st["lon"]
-        wind_deg = st.get("wind_deg")
+        weather = get_weather(lat, lon)
+        # Prefer the station's own weather reading if it has one; otherwise
+        # fall back to OpenWeather (most AirKaz PM sensors report no weather).
+        temp_c    = st.get("temp_c")    if st.get("temp_c")    is not None else weather.get("temp_c")
+        humidity  = st.get("humidity")  if st.get("humidity")  is not None else weather.get("humidity")
+        pressure  = st.get("pressure")  if st.get("pressure")  is not None else weather.get("pressure")
+        wind_speed = st.get("wind_speed") if st.get("wind_speed") is not None else weather.get("wind_speed")
+        wind_deg  = st.get("wind_deg")  if st.get("wind_deg")  is not None else weather.get("wind_deg")
+
         traffic = get_traffic(lat, lon)
         time.sleep(0.3)
 
@@ -213,9 +240,9 @@ def collect():
                "nearest_source": nearest[0],
                "nearest_source_dist_km": round(geodist_km(nearest[1]["lat"], nearest[1]["lon"], lat, lon), 2),
                **src_feats,
-               "temp_c": st.get("temp_c"), "humidity": st.get("humidity"),
-               "pressure": st.get("pressure"), "wind_speed": st.get("wind_speed"),
-               "wind_deg": wind_deg,
+               "temp_c": temp_c, "humidity": humidity,
+               "pressure": pressure, "wind_speed": wind_speed,
+               "wind_deg": wind_deg, "weather_desc": weather.get("weather_desc"),
                "heating_season": heating_season}
         rows.append(row)
 
@@ -249,4 +276,7 @@ if __name__ == "__main__":
     if not WAQI_TOKEN:
         print("ERROR: set WAQI_TOKEN (get free token at aqicn.org/data-platform/token/)")
     else:
+        if not OPENWEATHER_KEY:
+            print("  NOTE: OPENWEATHER_KEY not set — wind/temp/humidity will stay empty "
+                  "since this station doesn't report weather itself.")
         collect()

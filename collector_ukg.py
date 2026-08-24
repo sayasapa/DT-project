@@ -43,11 +43,12 @@ SOURCES = {
     "CHP":     {"lat": 49.9400, "lon": 82.6300, "type": "thermal_power_plant"},
 }
 
-# Real AirKaz.org / AirNet station UIDs for this city. Of the 5 candidates we
-# found on aqicn.org station pages, only 517507 ("М. Тынышпаев к-сі, 126")
-# actually resolves via the API — the other 4 return "no such station" under
-# both the "@" and "A" prefixes (likely stale/decommissioned page references).
-KNOWN_STATION_UIDS = [517507]
+# Real, confirmed official Қазгидромет (Kazhydromet — Kazakhstan's national
+# hydrometeorological service) station UIDs for Oskemen/Ust-Kamenogorsk, found
+# by fetching their live aqicn.org station pages (not guessed). These replace
+# the earlier AirKaz.org guesses (114562/114571/519514/517498), which turned
+# out to be stale/decommissioned page references outside the working ID range.
+KNOWN_STATION_UIDS = [517390, 517402, 517507]  # Серікбаев 19, Лев Толстой 18, М.Тынышпаев 126
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):

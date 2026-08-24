@@ -42,9 +42,11 @@ SOURCES = {
     "CHP":     {"lat": 49.9400, "lon": 82.6300, "type": "thermal_power_plant"},
 }
 
-# Real AirKaz.org / AirNet station UIDs confirmed to exist for this city
-# (verified via their aqicn.org station pages, not guessed).
-KNOWN_STATION_UIDS = [114562, 114571, 517507, 517498, 519514]
+# Real AirKaz.org / AirNet station UIDs for this city. Of the 5 candidates we
+# found on aqicn.org station pages, only 517507 ("М. Тынышпаев к-сі, 126")
+# actually resolves via the API — the other 4 return "no such station" under
+# both the "@" and "A" prefixes (likely stale/decommissioned page references).
+KNOWN_STATION_UIDS = [517507]
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):
@@ -65,6 +67,22 @@ def is_downwind(source_bearing, wind_deg, tol=60):
     plume_to = (wind_deg + 180) % 360
     diff = abs((source_bearing - plume_to + 180) % 360 - 180)
     return 1 if diff <= tol else 0
+
+def data_age_hours(aqi_time_iso, collected_at_iso):
+    """Hours between the station's own reported reading time and when we
+    collected it. Community sensors can go offline and serve a stale cached
+    reading, so this lets analysis filter out old data (e.g. > 3-6 hours)."""
+    if not aqi_time_iso:
+        return None
+    try:
+        t = aqi_time_iso.replace("Z", "+00:00")
+        aqi_dt = datetime.fromisoformat(t)
+        if aqi_dt.tzinfo is None:
+            aqi_dt = aqi_dt.replace(tzinfo=timezone.utc)
+        collected_dt = datetime.fromisoformat(collected_at_iso)
+        return round((collected_dt - aqi_dt).total_seconds() / 3600, 1)
+    except Exception:
+        return None
 
 def fetch_json(url):
     try:
@@ -188,6 +206,7 @@ def collect():
                "co": st.get("co"), "o3": st.get("o3"),
                "aqi": st.get("aqi"), "dominentpol": st.get("dominentpol"),
                "aqi_time": st.get("aqi_time"),
+               "data_age_hours": data_age_hours(st.get("aqi_time"), ts),
                "current_speed": traffic.get("current_speed"),
                "free_flow_speed": traffic.get("free_flow_speed"),
                "congestion_percent": traffic.get("congestion_percent"),

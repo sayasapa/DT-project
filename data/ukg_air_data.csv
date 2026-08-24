@@ -1,2 +1,6 @@
-timestamp_utc,cycle_id,city,state,country,lat,lon,aqi_us,main_us,aqi_cn,main_cn,pollution_time,current_speed,free_flow_speed,congestion_percent,nearest_source,nearest_source_dist_km,dist_Kazzinc_km,bearing_Kazzinc,downwind_Kazzinc,dist_UMZ_km,bearing_UMZ,downwind_UMZ,dist_CHP_km,bearing_CHP,downwind_CHP,temp_c,humidity,pressure,wind_speed,wind_deg,weather_icon,heating_season
-2026-08-24T12:45:27.541291+00:00,1787575527,Oskemen,East Kazakhstan,Kazakhstan,49.97143,82.60586,28,p2,7,p2,2026-08-24T12:00:00.000Z,33,37,10.8,Kazzinc,1.24,1.24,219.9,0,1.83,359.7,0,3.9,333.7,1,19,73,999,4.17,111,04d,0
+timestamp_utc,cycle_id,station_uid,station_name,lat,lon,pm25,pm10,no2,so2,co,o3,aqi,dominentpol,aqi_time,current_speed,free_flow_speed,congestion_percent,nearest_source,nearest_source_dist_km,dist_Kazzinc_km,bearing_Kazzinc,downwind_Kazzinc,dist_UMZ_km,bearing_UMZ,downwind_UMZ,dist_CHP_km,bearing_CHP,downwind_CHP,temp_c,humidity,pressure,wind_speed,wind_deg,heating_season
+2026-08-24T12:55:50.171486+00:00,1787576150,114562,unknown,49.9714,82.6059,,,,,,,,,,35,37,5.4,Kazzinc,1.24,1.24,219.7,0,1.83,359.8,0,3.9,333.7,0,,,,,,0
+2026-08-24T12:55:50.171486+00:00,1787576150,114571,unknown,49.9714,82.6059,,,,,,,,,,35,37,5.4,Kazzinc,1.24,1.24,219.7,0,1.83,359.8,0,3.9,333.7,0,,,,,,0
+2026-08-24T12:55:50.171486+00:00,1787576150,517507,unknown,49.9714,82.6059,,,,,,,,,,35,37,5.4,Kazzinc,1.24,1.24,219.7,0,1.83,359.8,0,3.9,333.7,0,,,,,,0
+2026-08-24T12:55:50.171486+00:00,1787576150,517498,unknown,49.9714,82.6059,,,,,,,,,,35,37,5.4,Kazzinc,1.24,1.24,219.7,0,1.83,359.8,0,3.9,333.7,0,,,,,,0
+2026-08-24T12:55:50.171486+00:00,1787576150,519514,unknown,49.9714,82.6059,,,,,,,,,,35,37,5.4,Kazzinc,1.24,1.24,219.7,0,1.83,359.8,0,3.9,333.7,0,,,,,,0

@@ -17,7 +17,7 @@ jobs:
           python-version: '3.11'
       - name: Run UKG collector
         env:
-          IQAIR_KEY: ${{ secrets.IQAIR_KEY }}
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
           TOMTOM_KEY: ${{ secrets.TOMTOM_KEY }}
         run: python collector_ukg.py
       - name: Commit UKG data

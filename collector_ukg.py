@@ -46,9 +46,10 @@ SOURCES = {
 # Real, confirmed official Қазгидромет (Kazhydromet — Kazakhstan's national
 # hydrometeorological service) station UIDs for Oskemen/Ust-Kamenogorsk, found
 # by fetching their live aqicn.org station pages (not guessed). These replace
-# the earlier AirKaz.org guesses (114562/114571/519514/517498), which turned
-# out to be stale/decommissioned page references outside the working ID range.
-KNOWN_STATION_UIDS = [517390, 517402, 517507]  # Серікбаев 19, Лев Толстой 18, М.Тынышпаев 126
+# the earlier AirKaz.org guesses (114562/114571/517498), which turned out to
+# be stale/decommissioned page references outside the working ID range.
+KNOWN_STATION_UIDS = [517390, 517402, 517507, 519514]
+# Серікбаев 19, Лев Толстой 18, М.Тынышпаев 126, Широкая 44
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):

@@ -77,26 +77,26 @@ def fetch_json(url):
 
 def fetch_station_feed(uid):
     """Try both the '@' and 'A' UID prefixes — WAQI requires 'A' for some
-    stations (observed quirk), '@' returns 'Unknown ID' for those same UIDs."""
+    stations (observed quirk), '@' returns 'Unknown ID' for those same UIDs.
+
+    Note: WAQI can return an OUTER status of "ok" while the nested "data"
+    object is itself an error (e.g. {"status":"ok","data":{"status":"error",
+    "msg":"Unknown ID"}}). So a valid reading is only one where "data" looks
+    like an actual station object (has "aqi"/"iaqi"/"city"), not just where
+    the outer status says "ok"."""
     for prefix in ("@", "A"):
         url = f"https://api.waqi.info/feed/{prefix}{uid}/?token={WAQI_TOKEN}"
         data = fetch_json(url)
-        if data and data.get("status") == "ok":
-            d = data["data"]
-            # Debug: WAQI can return status "ok" for a station that's currently
-            # offline / not reporting, with an empty or near-empty payload.
-            # Dump the raw response so we can tell that apart from a parsing bug.
-            if not d.get("iaqi") and not d.get("aqi"):
-                print(f"  feed {prefix}{uid}: status ok but looks empty. "
-                      f"raw={json.dumps(d)[:600]}")
-            else:
-                print(f"  feed {prefix}{uid}: ok, aqi={d.get('aqi')}, "
-                      f"city={d.get('city', {}).get('name')}")
+        d = data.get("data") if data else None
+        looks_valid = isinstance(d, dict) and ("aqi" in d or "iaqi" in d or "city" in d)
+
+        if data and data.get("status") == "ok" and looks_valid:
+            print(f"  feed {prefix}{uid}: ok, aqi={d.get('aqi')}, "
+                  f"city={d.get('city', {}).get('name')}")
             return d
         else:
-            status = data.get("status") if data else "no_response"
-            msg = data.get("data") if data else None
-            print(f"  feed {prefix}{uid}: non-ok status={status} msg={msg}")
+            print(f"  feed {prefix}{uid}: not valid. outer_status="
+                  f"{data.get('status') if data else 'no_response'} raw={json.dumps(d)[:300] if d is not None else data}")
         time.sleep(0.2)
     return None
 

@@ -19,7 +19,7 @@ import urllib.request
 WAQI_TOKEN      = os.environ.get("WAQI_TOKEN", "")
 OPENWEATHER_KEY = os.environ.get("OPENWEATHER_KEY", "")
 TOMTOM_KEY      = os.environ.get("TOMTOM_KEY", "")
-OUT_CSV         = "ukg_air_data.csv"
+OUT_CSV         = "data/ukg_air_data.csv"
 
 # City center (Ust-Kamenogorsk / Oskemen)
 CITY = {"name": "Ust-Kamenogorsk", "lat": 49.9714, "lon": 82.6059}
@@ -30,6 +30,13 @@ SOURCES = {
     "UMZ":     {"lat": 49.9550, "lon": 82.6060, "type": "metallurgical_uranium_beryllium"},
     "CHP":     {"lat": 49.9400, "lon": 82.6300, "type": "thermal_power_plant"},
 }
+
+# Fallback: known AQICN/WAQI station UIDs in Ust-Kamenogorsk (AirNet low-cost sensor
+# network). The map/bounds/ discovery endpoint frequently returns 0 results for this
+# city because AirNet community sensors aren't always indexed there, unlike Almaty's
+# official Kazhydromet station. We query these directly by UID as a guaranteed source
+# of data, in addition to whatever bounds discovery finds (deduplicated by uid).
+KNOWN_STATION_UIDS = [239470, 519514]
 
 # ---------------- HELPERS ----------------
 def geodist_km(lat1, lon1, lat2, lon2):
@@ -67,12 +74,39 @@ def get_aqicn_stations():
     url = f"https://api.waqi.info/map/bounds/?latlng={lat1},{lon1},{lat2},{lon2}&token={WAQI_TOKEN}"
     data = fetch_json(url)
     stations = []
+    seen_uids = set()
     if data and data.get("status") == "ok":
         for s in data["data"]:
-            stations.append({"uid": s.get("uid"), "lat": s.get("lat"),
+            uid = s.get("uid")
+            stations.append({"uid": uid, "lat": s.get("lat"),
                              "lon": s.get("lon"),
                              "name": s.get("station", {}).get("name", "unknown"),
                              "aqi": s.get("aqi")})
+            seen_uids.add(uid)
+    else:
+        # Debug: surface *why* bounds discovery failed (bad token, rate limit, etc.)
+        status = data.get("status") if data else "no_response"
+        print(f"  bounds discovery non-ok status: {status} raw={data}")
+
+    # Fallback / supplement: query known Ust-Kamenogorsk station UIDs directly.
+    # This guarantees data even when map/bounds discovery misses AirNet sensors.
+    for uid in KNOWN_STATION_UIDS:
+        if uid in seen_uids:
+            continue
+        detail_url = f"https://api.waqi.info/feed/@{uid}/?token={WAQI_TOKEN}"
+        d = fetch_json(detail_url)
+        if d and d.get("status") == "ok":
+            dd = d["data"]
+            stations.append({"uid": uid, "lat": dd.get("city", {}).get("geo", [None, None])[0],
+                             "lon": dd.get("city", {}).get("geo", [None, None])[1],
+                             "name": dd.get("city", {}).get("name", "unknown"),
+                             "aqi": dd.get("aqi")})
+            seen_uids.add(uid)
+        else:
+            status = d.get("status") if d else "no_response"
+            print(f"  known station @{uid} non-ok status: {status}")
+        time.sleep(0.3)
+
     return stations
 
 def get_aqicn_detail(uid):
@@ -175,6 +209,7 @@ def collect():
         rows.append(row)
 
     if rows:
+        os.makedirs(os.path.dirname(OUT_CSV), exist_ok=True)
         file_exists = os.path.isfile(OUT_CSV)
         with open(OUT_CSV, "a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

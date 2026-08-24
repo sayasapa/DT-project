@@ -87,13 +87,19 @@ def get_iqair_reading(lat, lon):
     wea = cur.get("weather", {})
     coords = (d.get("location", {}) or {}).get("coordinates") or [None, None]  # [lon, lat]
 
+    pm25 = (pol.get("p2") or {}).get("conc")
+    pm10 = (pol.get("p1") or {}).get("conc")
+    if pm25 is None and pm10 is None:
+        # Debug: see exactly what the pollution block contains if concentration
+        # fields are missing (Community tier may only expose AQI, not raw µg/m³).
+        print(f"  IQAir: pm25/pm10 conc missing. pollution raw={json.dumps(pol)}")
+
     return {
         "city": d.get("city"), "state": d.get("state"), "country": d.get("country"),
         "lat": coords[1], "lon": coords[0],
         "aqi_us": pol.get("aqius"), "main_us": pol.get("mainus"),
         "aqi_cn": pol.get("aqicn"), "main_cn": pol.get("maincn"),
-        "pm25": (pol.get("p2") or {}).get("conc"),
-        "pm10": (pol.get("p1") or {}).get("conc"),
+        "pm25": pm25, "pm10": pm10,
         "pollution_time": pol.get("ts"),
         "temp_c": wea.get("tp"), "pressure": wea.get("pr"), "humidity": wea.get("hu"),
         "wind_speed": wea.get("ws"), "wind_deg": wea.get("wd"), "weather_icon": wea.get("ic"),
@@ -166,9 +172,22 @@ def collect():
            "heating_season": heating_season}
 
     os.makedirs(os.path.dirname(OUT_CSV), exist_ok=True)
+    fieldnames = list(row.keys())
     file_exists = os.path.isfile(OUT_CSV)
+
+    if file_exists:
+        with open(OUT_CSV, "r", encoding="utf-8") as f:
+            existing_header = f.readline().strip().split(",")
+        if existing_header != fieldnames:
+            # Schema changed (e.g. switched data provider) — don't silently mix
+            # incompatible rows under one header. Archive the old file instead.
+            archive_path = OUT_CSV.replace(".csv", f"_archive_{int(time.time())}.csv")
+            os.rename(OUT_CSV, archive_path)
+            print(f"  CSV schema changed, archived old file to {archive_path}")
+            file_exists = False
+
     with open(OUT_CSV, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(row.keys()))
+        w = csv.DictWriter(f, fieldnames=fieldnames)
         if not file_exists:
             w.writeheader()
         w.writerow(row)

@@ -18,6 +18,7 @@ jobs:
       - name: Run UKG collector
         env:
           WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+          OPENWEATHER_KEY: ${{ secrets.OPENWEATHER_KEY }}
           TOMTOM_KEY: ${{ secrets.TOMTOM_KEY }}
         run: python collector_ukg.py
       - name: Commit UKG data

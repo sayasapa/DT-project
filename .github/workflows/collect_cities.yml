@@ -1,0 +1,31 @@
+name: Collect KZ Cities Air Data
+on:
+  schedule:
+    - cron: '10,30,50 * * * *'   # offset from Almaty(:00,:20,:40) and UKG(:05,:25,:45)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  collect_cities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run multi-city collector
+        env:
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+          OPENWEATHER_KEY: ${{ secrets.OPENWEATHER_KEY }}
+          TOMTOM_KEY: ${{ secrets.TOMTOM_KEY }}
+        run: python collector_cities.py
+      - name: Commit data
+        run: |
+          git config user.name "cities-collector-bot"
+          git config user.email "actions@github.com"
+          git add data/cities_air_data.csv || echo "no file"
+          git commit -m "cities data: $(date -u +%Y-%m-%dT%H:%M)" || echo "nothing to commit"
+          git pull --rebase --autostash || true
+          git push || echo "nothing to push"

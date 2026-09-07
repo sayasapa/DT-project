@@ -50,33 +50,27 @@ CITIES = {
     },
     "Pavlodar": {
         "lat": 52.2873, "lon": 76.9674,
-        # All 4 originally-found IDs (150022/236602/231715/236608) are
-        # AirKaz.org-network stations and consistently returned "no such
-        # station" via the public WAQI token — same failure pattern as
-        # Ust-Kamenogorsk's AirKaz IDs earlier. Rely on search fallback
-        # until a confirmed working Kazhydromet-network UID is found.
         "station_uids": [],
-        "search_keywords": ["Pavlodar"],
+        "search_keywords": ["Pavlodar", "Павлодар"],
         "sources": {
             "AluminiumSmelter": {"lat": 52.3130, "lon": 77.0500, "type": "aluminium_smelter_chpp"},
         },
     },
     "Temirtau": {
         "lat": 50.0546, "lon": 72.9648,
-        # 36254881 / 3218686 (AirKaz.org) confirmed dead — dropped, keep the
-        # one confirmed-responding station.
         "station_uids": [114529],
-        "search_keywords": ["Temirtau"],
+        "search_keywords": ["Temirtau", "Теміртау"],
         "sources": {
             "Qarmet": {"lat": 50.031766, "lon": 72.994863, "type": "integrated_steel_plant"},
         },
     },
     "Astana": {
         "lat": 51.1694, "lon": 71.4491,
-        # H10497 (US Embassy), 98310 (sensor.community), 32149779 (AirKaz.org)
-        # all failed. Rely entirely on search fallback for now.
-        "station_uids": [],
-        "search_keywords": ["Astana", "Nur-Sultan"],
+        # Confirmed working: US Embassy Astana (found via search fallback,
+        # the "H10497" reference on aqicn.org's widget text was a concatenation
+        # artifact — the real UID is plain 10497 via the "@" prefix).
+        "station_uids": [10497],
+        "search_keywords": ["Astana"],
         "sources": {},  # traffic/heating profile, not a point-source city
     },
 }
@@ -168,6 +162,20 @@ def get_traffic(lat, lon):
         return {"current_speed": cur, "free_flow_speed": free, "congestion_percent": congestion}
     return {}
 
+# Kazakhstan's rough bounding box — used to reject bogus search-fallback
+# results. Observed bug: WAQI's search endpoint can return an unrelated,
+# broad global list (e.g. Moscow/Boston/Houston stations) when a keyword
+# doesn't match tightly, instead of an empty result. This is a hard safety
+# filter, not an optimization.
+KZ_BOUNDS = {"lat_min": 40.5, "lat_max": 55.5, "lon_min": 46.0, "lon_max": 87.5}
+
+def in_kazakhstan(lat, lon):
+    try:
+        return (KZ_BOUNDS["lat_min"] <= float(lat) <= KZ_BOUNDS["lat_max"] and
+                KZ_BOUNDS["lon_min"] <= float(lon) <= KZ_BOUNDS["lon_max"])
+    except (TypeError, ValueError):
+        return False
+
 def search_stations(keyword, seen_uids):
     """Fallback discovery via WAQI's search endpoint — finds real, queryable
     UIDs by city name instead of guessing them from scraped page references."""
@@ -198,6 +206,10 @@ def collect_city(city_name, cfg, ts, cycle_id, heating_season):
         seen_uids.add(uid)
         if not d:
             continue
+        geo = d.get("city", {}).get("geo")
+        if geo and not in_kazakhstan(geo[0], geo[1]):
+            print(f"    feed {uid}: rejected, outside Kazakhstan (geo={geo})")
+            continue
         rows.append(_build_row(city_name, uid, d, ts, cycle_id, weather, wind_deg,
                                 heating_season, cfg))
 
@@ -210,6 +222,11 @@ def collect_city(city_name, cfg, ts, cycle_id, heating_season):
                 seen_uids.add(uid)
                 d = fetch_station_feed(uid, cfg["lat"], cfg["lon"])
                 if d:
+                    geo = d.get("city", {}).get("geo")
+                    if not geo or not in_kazakhstan(geo[0], geo[1]):
+                        print(f"    feed {uid}: rejected, outside Kazakhstan "
+                              f"(geo={geo}, city={d.get('city', {}).get('name')})")
+                        continue
                     rows.append(_build_row(city_name, uid, d, ts, cycle_id, weather,
                                             wind_deg, heating_season, cfg))
                 time.sleep(0.2)

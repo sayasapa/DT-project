@@ -43,17 +43,13 @@ CITIES = {
     },
     "Karaganda": {
         "lat": 49.8047, "lon": 73.1094,
-        # 114505 (Ситимол) confirmed dead ("no such station") — dropped.
         "station_uids": [506290, 517423],
         "search_keywords": ["Karaganda", "Karagandy"],
-        "sources": {},  # no single dominant point source identified yet
+        "sources": {},
     },
     "Pavlodar": {
         "lat": 52.2873, "lon": 76.9674,
-        # Found via direct aqicn.org/map/pavlodar/ page fetch (not stale search
-        # snippets this time — these are current live station links).
         "station_uids": [520273, 537550, 573904, 573907, 114532],
-        # Торайғыров 32, Естай 54, Каз.Правда, Ломов (ПМУ), Пед.колледж
         "search_keywords": ["Pavlodar", "Павлодар"],
         "sources": {
             "AluminiumSmelter": {"lat": 52.3130, "lon": 77.0500, "type": "aluminium_smelter_chpp"},
@@ -61,9 +57,6 @@ CITIES = {
     },
     "Temirtau": {
         "lat": 50.0546, "lon": 72.9648,
-        # 114529 has been stuck reporting a reading from ~223 days ago across
-        # multiple runs — effectively dead, not just intermittently offline.
-        # Dropped; relying on search fallback until a live station is found.
         "station_uids": [],
         "search_keywords": ["Temirtau", "Теміртау"],
         "sources": {
@@ -72,12 +65,9 @@ CITIES = {
     },
     "Astana": {
         "lat": 51.1694, "lon": 71.4491,
-        # Confirmed working: US Embassy Astana (found via search fallback,
-        # the "H10497" reference on aqicn.org's widget text was a concatenation
-        # artifact — the real UID is plain 10497 via the "@" prefix).
         "station_uids": [10497],
         "search_keywords": ["Astana"],
-        "sources": {},  # traffic/heating profile, not a point-source city
+        "sources": {},
     },
 }
 
@@ -296,15 +286,22 @@ def collect():
         print("No data collected this cycle")
         return
 
-    # Union of all fieldnames across cities (different cities have different
-    # source-feature columns), keep a stable, readable column order.
+    # Union of all fieldnames is computed from the static CITIES config, not
+    # from this cycle's actual rows — otherwise the header changes shape
+    # every time a city happens to report 0 stations (its dist_*/bearing_*/
+    # downwind_* columns would silently disappear), triggering pointless
+    # schema-archive churn. Column set stays stable regardless of which
+    # cities/stations respond on any given run.
     base_cols = ["city","timestamp_utc","cycle_id","station_uid","station_name",
                  "lat","lon","pm25","pm10","no2","so2","co","o3","aqi","dominentpol",
                  "aqi_time","data_age_hours","current_speed","congestion_percent",
                  "nearest_source","nearest_source_dist_km"]
-    extra_cols = sorted({k for r in all_rows for k in r.keys()} - set(base_cols) -
-                         {"temp_c","humidity","pressure","wind_speed","wind_deg",
-                          "weather_desc","heating_season"})
+    extra_cols = sorted({
+        col
+        for cfg in CITIES.values()
+        for sname in cfg["sources"]
+        for col in (f"dist_{sname}_km", f"bearing_{sname}", f"downwind_{sname}")
+    })
     fieldnames = base_cols + extra_cols + ["temp_c","humidity","pressure","wind_speed",
                                             "wind_deg","weather_desc","heating_season"]
 

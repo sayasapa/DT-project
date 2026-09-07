@@ -61,7 +61,10 @@ CITIES = {
     },
     "Temirtau": {
         "lat": 50.0546, "lon": 72.9648,
-        "station_uids": [114529],
+        # 114529 has been stuck reporting a reading from ~223 days ago across
+        # multiple runs — effectively dead, not just intermittently offline.
+        # Dropped; relying on search fallback until a live station is found.
+        "station_uids": [],
         "search_keywords": ["Temirtau", "Теміртау"],
         "sources": {
             "Qarmet": {"lat": 50.031766, "lon": 72.994863, "type": "integrated_steel_plant"},

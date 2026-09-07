@@ -50,7 +50,10 @@ CITIES = {
     },
     "Pavlodar": {
         "lat": 52.2873, "lon": 76.9674,
-        "station_uids": [],
+        # Found via direct aqicn.org/map/pavlodar/ page fetch (not stale search
+        # snippets this time — these are current live station links).
+        "station_uids": [520273, 537550, 573904, 573907, 114532],
+        # Торайғыров 32, Естай 54, Каз.Правда, Ломов (ПМУ), Пед.колледж
         "search_keywords": ["Pavlodar", "Павлодар"],
         "sources": {
             "AluminiumSmelter": {"lat": 52.3130, "lon": 77.0500, "type": "aluminium_smelter_chpp"},

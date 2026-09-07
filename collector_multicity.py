@@ -34,7 +34,7 @@ CITIES = {
     "Ust-Kamenogorsk": {
         "lat": 49.9714, "lon": 82.6059,
         "station_uids": [517390, 517402, 517507],
-        # Серікбаев 19, Лев Толстой 18, М.Тынышпаев 126
+        "search_keywords": ["Ust-Kamenogorsk", "Oskemen"],
         "sources": {
             "Kazzinc": {"lat": 49.9800, "lon": 82.6170, "type": "lead_zinc_copper_smelter"},
             "UMZ":     {"lat": 49.9550, "lon": 82.6060, "type": "metallurgical_uranium_beryllium"},
@@ -43,37 +43,41 @@ CITIES = {
     },
     "Karaganda": {
         "lat": 49.8047, "lon": 73.1094,
-        "station_uids": [506290, 114505, 517423],
-        # Майкудук, Ситимол, Мұқанов 57/3
-        # No single dominant point source identified yet (diffuse coal-fired
-        # heating + regional power plants — GRES-1/2). downwind_* omitted.
-        "sources": {},
+        # 114505 (Ситимол) confirmed dead ("no such station") — dropped.
+        "station_uids": [506290, 517423],
+        "search_keywords": ["Karaganda", "Karagandy"],
+        "sources": {},  # no single dominant point source identified yet
     },
     "Pavlodar": {
         "lat": 52.2873, "lon": 76.9674,
-        "station_uids": [150022, 236602, 231715, 236608],
-        # Павлодар 2, ул. Ткачева, ВКЦМ, КВД
+        # All 4 originally-found IDs (150022/236602/231715/236608) are
+        # AirKaz.org-network stations and consistently returned "no such
+        # station" via the public WAQI token — same failure pattern as
+        # Ust-Kamenogorsk's AirKaz IDs earlier. Rely on search fallback
+        # until a confirmed working Kazhydromet-network UID is found.
+        "station_uids": [],
+        "search_keywords": ["Pavlodar"],
         "sources": {
-            # Approximate — East Industrial Zone; verify precise coordinates
-            # before using in publication-grade downwind analysis.
             "AluminiumSmelter": {"lat": 52.3130, "lon": 77.0500, "type": "aluminium_smelter_chpp"},
         },
     },
     "Temirtau": {
         "lat": 50.0546, "lon": 72.9648,
-        "station_uids": [114529, 36254881, 3218686],
-        # Темиртау 70 квартал, Правый берег (AirKaz), СШ 16 (AirKaz)
+        # 36254881 / 3218686 (AirKaz.org) confirmed dead — dropped, keep the
+        # one confirmed-responding station.
+        "station_uids": [114529],
+        "search_keywords": ["Temirtau"],
         "sources": {
             "Qarmet": {"lat": 50.031766, "lon": 72.994863, "type": "integrated_steel_plant"},
         },
     },
     "Astana": {
         "lat": 51.1694, "lon": 71.4491,
-        "station_uids": ["H10497", 98310, 32149779],
-        # US Embassy, Mangilik Yel (sensor.community), Ташенова 8 (AirKaz)
-        # No major point-source industry — traffic/heating profile, not
-        # metallurgical. downwind_* omitted.
-        "sources": {},
+        # H10497 (US Embassy), 98310 (sensor.community), 32149779 (AirKaz.org)
+        # all failed. Rely entirely on search fallback for now.
+        "station_uids": [],
+        "search_keywords": ["Astana", "Nur-Sultan"],
+        "sources": {},  # traffic/heating profile, not a point-source city
     },
 }
 
@@ -164,6 +168,23 @@ def get_traffic(lat, lon):
         return {"current_speed": cur, "free_flow_speed": free, "congestion_percent": congestion}
     return {}
 
+def search_stations(keyword, seen_uids):
+    """Fallback discovery via WAQI's search endpoint — finds real, queryable
+    UIDs by city name instead of guessing them from scraped page references."""
+    import urllib.parse
+    url = f"https://api.waqi.info/search/?token={WAQI_TOKEN}&keyword={urllib.parse.quote(keyword)}"
+    data = fetch_json(url)
+    found = []
+    if data and data.get("status") == "ok":
+        for s in data.get("data", []):
+            uid = s.get("uid")
+            if uid in seen_uids:
+                continue
+            found.append(uid)
+    else:
+        print(f"    search '{keyword}' non-ok status: {data.get('status') if data else 'no_response'}")
+    return found
+
 # ---------------- MAIN ----------------
 def collect_city(city_name, cfg, ts, cycle_id, heating_season):
     print(f"  --- {city_name} ---")
@@ -171,53 +192,72 @@ def collect_city(city_name, cfg, ts, cycle_id, heating_season):
     wind_deg = weather.get("wind_deg")
 
     rows = []
+    seen_uids = set()
     for uid in cfg["station_uids"]:
         d = fetch_station_feed(uid, cfg["lat"], cfg["lon"])
+        seen_uids.add(uid)
         if not d:
             continue
-        iaqi = d.get("iaqi", {})
-        geo = d.get("city", {}).get("geo")
-        lat = geo[0] if geo and len(geo) == 2 else cfg["lat"]
-        lon = geo[1] if geo and len(geo) == 2 else cfg["lon"]
+        rows.append(_build_row(city_name, uid, d, ts, cycle_id, weather, wind_deg,
+                                heating_season, cfg))
 
-        row = {
-            "city": city_name, "timestamp_utc": ts, "cycle_id": cycle_id,
-            "station_uid": uid, "station_name": d.get("city", {}).get("name", "unknown"),
-            "lat": lat, "lon": lon,
-            "pm25": iaqi.get("pm25", {}).get("v"), "pm10": iaqi.get("pm10", {}).get("v"),
-            "no2": iaqi.get("no2", {}).get("v"), "so2": iaqi.get("so2", {}).get("v"),
-            "co": iaqi.get("co", {}).get("v"), "o3": iaqi.get("o3", {}).get("v"),
-            "aqi": d.get("aqi"), "dominentpol": d.get("dominentpol"),
-            "aqi_time": d.get("time", {}).get("iso"),
-            "data_age_hours": data_age_hours(d.get("time", {}).get("iso"), ts),
-            "temp_c": weather.get("temp_c"), "humidity": weather.get("humidity"),
-            "pressure": weather.get("pressure"), "wind_speed": weather.get("wind_speed"),
-            "wind_deg": wind_deg, "weather_desc": weather.get("weather_desc"),
-            "heating_season": heating_season,
-        }
-
-        # optional traffic + source features
-        traffic = get_traffic(lat, lon)
-        row["current_speed"] = traffic.get("current_speed")
-        row["congestion_percent"] = traffic.get("congestion_percent")
-
-        if cfg["sources"]:
-            nearest = min(cfg["sources"].items(),
-                          key=lambda kv: geodist_km(kv[1]["lat"], kv[1]["lon"], lat, lon))
-            row["nearest_source"] = nearest[0]
-            row["nearest_source_dist_km"] = round(
-                geodist_km(nearest[1]["lat"], nearest[1]["lon"], lat, lon), 2)
-            for sname, s in cfg["sources"].items():
-                b = bearing_from(s["lat"], s["lon"], lat, lon)
-                row[f"dist_{sname}_km"] = round(geodist_km(s["lat"], s["lon"], lat, lon), 2)
-                row[f"bearing_{sname}"] = round(b, 1)
-                row[f"downwind_{sname}"] = is_downwind(b, wind_deg)
-
-        rows.append(row)
-        time.sleep(0.3)
+    # Auto-fallback: if none of the known UIDs worked, search by city name for
+    # real, currently-registered stations instead of relying on manually
+    # scraped IDs (which can be stale/wrong, as seen with several AirKaz refs).
+    if not rows and cfg.get("search_keywords"):
+        for kw in cfg["search_keywords"]:
+            for uid in search_stations(kw, seen_uids):
+                seen_uids.add(uid)
+                d = fetch_station_feed(uid, cfg["lat"], cfg["lon"])
+                if d:
+                    rows.append(_build_row(city_name, uid, d, ts, cycle_id, weather,
+                                            wind_deg, heating_season, cfg))
+                time.sleep(0.2)
+            if rows:
+                break
 
     print(f"    -> {len(rows)} station reading(s)")
     return rows
+
+def _build_row(city_name, uid, d, ts, cycle_id, weather, wind_deg, heating_season, cfg):
+    iaqi = d.get("iaqi", {})
+    geo = d.get("city", {}).get("geo")
+    lat = geo[0] if geo and len(geo) == 2 else cfg["lat"]
+    lon = geo[1] if geo and len(geo) == 2 else cfg["lon"]
+
+    row = {
+        "city": city_name, "timestamp_utc": ts, "cycle_id": cycle_id,
+        "station_uid": uid, "station_name": d.get("city", {}).get("name", "unknown"),
+        "lat": lat, "lon": lon,
+        "pm25": iaqi.get("pm25", {}).get("v"), "pm10": iaqi.get("pm10", {}).get("v"),
+        "no2": iaqi.get("no2", {}).get("v"), "so2": iaqi.get("so2", {}).get("v"),
+        "co": iaqi.get("co", {}).get("v"), "o3": iaqi.get("o3", {}).get("v"),
+        "aqi": d.get("aqi"), "dominentpol": d.get("dominentpol"),
+        "aqi_time": d.get("time", {}).get("iso"),
+        "data_age_hours": data_age_hours(d.get("time", {}).get("iso"), ts),
+        "temp_c": weather.get("temp_c"), "humidity": weather.get("humidity"),
+        "pressure": weather.get("pressure"), "wind_speed": weather.get("wind_speed"),
+        "wind_deg": wind_deg, "weather_desc": weather.get("weather_desc"),
+        "heating_season": heating_season,
+    }
+
+    traffic = get_traffic(lat, lon)
+    row["current_speed"] = traffic.get("current_speed")
+    row["congestion_percent"] = traffic.get("congestion_percent")
+
+    if cfg["sources"]:
+        nearest = min(cfg["sources"].items(),
+                      key=lambda kv: geodist_km(kv[1]["lat"], kv[1]["lon"], lat, lon))
+        row["nearest_source"] = nearest[0]
+        row["nearest_source_dist_km"] = round(
+            geodist_km(nearest[1]["lat"], nearest[1]["lon"], lat, lon), 2)
+        for sname, s in cfg["sources"].items():
+            b = bearing_from(s["lat"], s["lon"], lat, lon)
+            row[f"dist_{sname}_km"] = round(geodist_km(s["lat"], s["lon"], lat, lon), 2)
+            row[f"bearing_{sname}"] = round(b, 1)
+            row[f"downwind_{sname}"] = is_downwind(b, wind_deg)
+
+    return row
 
 def collect():
     ts = datetime.now(timezone.utc).isoformat()
